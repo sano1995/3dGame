@@ -11,9 +11,11 @@
     <title>Пушистик</title>
   </head>
   <body>
+    <video id="camfeed" playsinline muted></video>
     <canvas id="scene"></canvas>
     <div id="overlay">
       <div id="badge" hidden></div>
+      <div id="toast" hidden role="status"></div>
       <div id="hint" hidden aria-hidden="true">👆</div>
       <div id="bar">
         <button id="btn-voice" class="round" aria-label="Повторялка">🎤</button>
