@@ -166,6 +166,7 @@ canvas.addEventListener('pointerdown', (e) => {
   sfx.unlock();
   rayFromEvent(e);
   if (gestureDown()) canvas.setPointerCapture(e.pointerId);
+  else callToFloor(1.0);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!gesture.active) return;
@@ -175,6 +176,69 @@ canvas.addEventListener('pointermove', (e) => {
 const up = () => gestureUp();
 canvas.addEventListener('pointerup', up);
 canvas.addEventListener('pointercancel', up);
+
+// ---------- прогулки ----------
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const HOME_RADIUS = 0.5; // в «Домике» гуляет по коврику
+// Экран телефона узкий: по бокам гуляем меньше, чем вперёд-назад.
+const clampHome = (v) => {
+  if (v.length() > HOME_RADIUS) v.setLength(HOME_RADIUS);
+  v.x = THREE.MathUtils.clamp(v.x, -0.34, 0.34);
+  return v;
+};
+const camFloor = new THREE.Vector3();
+let followCooldown = 0;
+
+/** Тап по полу: зверёк бежит к этому месту. maxDist — в единицах якоря. */
+function callToFloor(maxDist) {
+  if (renderer.xr.isPresenting && !placed) return;
+  floorPlane.constant = -anchor.position.y;
+  if (!raycaster.ray.intersectPlane(floorPlane, tmp)) return;
+  const local = anchor.worldToLocal(tmp.clone());
+  local.y = 0;
+  if (local.length() > maxDist) return;
+  if (!renderer.xr.isPresenting) {
+    if (local.length() > 1.05) return; // мимо коврика
+    clampHome(local);
+  }
+  hideHint();
+  const far = local.distanceTo(pet.root.position) > (renderer.xr.isPresenting ? 2.5 : 0.35);
+  pet.goTo(local, { run: far });
+  particles.spawn('star', local.clone().setY(0.05), 6);
+  sfx.play('pip');
+}
+
+pet.pickWanderPoint = () => {
+  const p = new THREE.Vector3();
+  if (!renderer.xr.isPresenting) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * HOME_RADIUS;
+    return clampHome(p.set(Math.cos(a) * r, 0, Math.sin(a) * r));
+  }
+  if (!placed) return null;
+  // В AR гуляет недалеко, но так, чтобы оставаться перед ребёнком и не лезть под ноги.
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2;
+    p.copy(pet.root.position).add(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(0.8 + Math.random() * 1.5));
+    const d = p.distanceTo(camFloor);
+    if (d > 2.2 && d < 7) return p;
+  }
+  return null;
+};
+
+/** В AR: если ребёнок отошёл далеко, зверёк бежит следом. */
+function followInAR(dt) {
+  followCooldown -= dt;
+  camFloor.copy(anchor.worldToLocal(camPos.clone()));
+  camFloor.y = 0;
+  if (followCooldown > 0 || pet.moving || pet.action) return;
+  const d = camFloor.distanceTo(pet.root.position);
+  if (d > 7.5) {
+    const to = pet.root.position.clone().sub(camFloor).setLength(3).add(camFloor);
+    pet.goTo(to, { run: true });
+    followCooldown = 1.5;
+  }
+}
 
 // ---------- AR ----------
 const arPos = new THREE.Vector3();
@@ -187,7 +251,7 @@ const ar = new AR({
       return;
     }
     ar.setRay(raycaster);
-    gestureDown();
+    if (!gestureDown()) callToFloor(5 / AR_SCALE);
   },
   onSelectEnd: () => gestureUp(),
   onEnd: () => leaveAR(),
@@ -199,6 +263,8 @@ function placePet(pos) {
   anchor.visible = true;
   placed = true;
   ar.wantReticle = false;
+  pet.stop();
+  pet.root.position.set(0, 0, 0);
   // Сразу смотрит на ребёнка.
   const cam = renderer.xr.getCamera().getWorldPosition(tmp);
   pet.root.rotation.y = Math.atan2(cam.x - pos.x, cam.z - pos.z);
@@ -235,6 +301,8 @@ function leaveAR() {
   anchor.visible = true;
   anchor.position.set(0, 0, 0);
   anchor.scale.setScalar(1);
+  pet.stop();
+  pet.root.position.set(0, 0, 0);
   pet.root.rotation.y = HOME_FACING;
   pet.facingBias = HOME_FACING;
   ui.ar.hidden = !arSupported;
@@ -331,6 +399,7 @@ renderer.setAnimationLoop((time, frame) => {
   if (!inAR && gesture.active && raycaster.ray.intersectPlane(lookPlane, tmp)) pet.lookTarget.copy(tmp);
   else pet.lookTarget.copy(camPos);
   pet.faceTarget = camPos;
+  if (inAR && placed) followInAR(dt);
 
   pet.petting = isPetting();
   voice.update();

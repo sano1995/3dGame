@@ -252,8 +252,8 @@ const ACTIONS = {
 };
 
 const IDLE = [
-  ['headTilt', 0.3], ['lookAround', 0.2], ['earTwitch', 0.2],
-  ['tailSwish', 0.12], ['hop', 0.1], ['yawn', 0.08],
+  ['wander', 0.45], ['headTilt', 0.3], ['lookAround', 0.18], ['earTwitch', 0.2],
+  ['tailSwish', 0.12], ['hop', 0.1], ['yawn', 0.07],
 ];
 
 const REACTIONS = {
@@ -302,6 +302,63 @@ export class Creature {
     this.talk = 0;
     this.listening = false;
     this.listenLevel = 0;
+    // Ходьба. Координаты цели — в системе родителя (якоря).
+    this.move = { target: null, run: false, speed: 0, phase: 0, gait: 0 };
+    this.pickWanderPoint = null; // main.js решает, куда можно гулять в текущем режиме
+    this.faceAfterMove = false;
+  }
+
+  // ----- ходьба -----------------------------------------------------------
+
+  get moving() { return !!this.move.target; }
+
+  goTo(point, { run = false } = {}) {
+    if (this.action?.def.react) this.action = null;
+    this.move.target = new THREE.Vector3(point.x, 0, point.z);
+    this.move.run = run;
+    this.turning = false;
+  }
+
+  stop() { this.move.target = null; }
+
+  _updateMove(dt, P) {
+    const m = this.move;
+    m.gait = damp(m.gait, m.target ? 1 : 0, 8, dt);
+    if (m.target) {
+      const pos = this.root.position;
+      const dx = m.target.x - pos.x, dz = m.target.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.03) {
+        m.target = null;
+        this.faceAfterMove = true;
+        this.idleTimer = Math.max(this.idleTimer, rand(2, 4));
+      } else {
+        const diff = angleDiff(Math.atan2(dx, dz), this.root.rotation.y);
+        this.root.rotation.y += Math.sign(diff) * Math.min(Math.abs(diff), 7 * dt);
+        const facing = Math.abs(diff) < 0.7 ? 1 : 0.15;
+        const top = m.run ? 1.9 : 0.85;
+        m.speed = damp(m.speed, top * facing * Math.min(1, dist / 0.2 + 0.25), 6, dt);
+        const step = Math.min(dist, m.speed * dt);
+        pos.x += Math.sin(this.root.rotation.y) * step;
+        pos.z += Math.cos(this.root.rotation.y) * step;
+      }
+    } else {
+      m.speed = damp(m.speed, 0, 8, dt);
+    }
+
+    const g = m.gait;
+    if (g < 0.01) return;
+    m.phase += dt * (m.run ? 15 : 10) * Math.max(0.4, g);
+    const s = Math.sin(m.phase);
+    const bounce = Math.abs(s);
+    P.jump += g * (m.run ? 0.08 : 0.045) * bounce;
+    P.squash += g * 0.05 * (bounce - 0.55);
+    P.bodyPitch += g * (m.run ? 0.2 : 0.1);
+    P.headPitch += -g * (m.run ? 0.14 : 0.07);
+    P.earBack += g * (0.15 + 0.12 * Math.sin(m.phase * 2));
+    P.tailAmp = Math.max(P.tailAmp, 0.55 * g);
+    P.tailSpeed = Math.max(P.tailSpeed, 8);
+    P.legSwing = g * (m.run ? 0.75 : 0.5) * s;
   }
 
   // ----- построение -------------------------------------------------------
@@ -338,14 +395,22 @@ export class Creature {
     this._blob(B, M.accent, 'belly', [0, 0.33, 0.19], 1, [0.21, 0.24, 0.13], 0.01);
 
     // Задние лапки и стопы.
+    this.backFeet = [];
     for (const sx of [-1, 1]) {
       this._blob(B, M.body, 'body', [0.21 * sx, 0.14, -0.05], 1, [0.15, 0.14, 0.18]);
-      this._blob(B, M.accent, 'paw', [0.21 * sx, 0.045, 0.12], 1, [0.085, 0.05, 0.12], 0.01);
+      const foot = this._blob(B, M.accent, 'paw', [0.21 * sx, 0.045, 0.12], 1, [0.085, 0.05, 0.12], 0.01);
+      foot.userData.base = foot.position.clone();
+      this.backFeet.push(foot);
     }
-    // Передние лапки.
+    // Передние лапки: шарнир в «плече», чтобы шагать.
+    this.frontLegs = [];
     for (const sx of [-1, 1]) {
-      this._mesh(LEG, M.body, B, { part: 'paw', pos: [0.115 * sx, 0.16, 0.2], outline: 0.012, ext: [0.065, 0.135, 0.065] });
-      this._blob(B, M.accent, 'paw', [0.115 * sx, 0.05, 0.235], 1, [0.08, 0.055, 0.095], 0.01);
+      const leg = new THREE.Group();
+      leg.position.set(0.115 * sx, 0.27, 0.2);
+      B.add(leg);
+      this._mesh(LEG, M.body, leg, { part: 'paw', pos: [0, -0.11, 0], outline: 0.012, ext: [0.065, 0.135, 0.065] });
+      this._blob(leg, M.accent, 'paw', [0, -0.22, 0.035], 1, [0.08, 0.055, 0.095], 0.01);
+      this.frontLegs.push(leg);
     }
 
     // Пушистый воротник.
@@ -496,6 +561,7 @@ export class Creature {
   }
 
   react(part) {
+    this.stop();
     if (part === 'earL' || part === 'earR') return this.play('earFlick', { side: part === 'earL' ? -1 : 1 });
     const name = REACTIONS[part];
     if (name) return this.play(name);
@@ -520,8 +586,8 @@ export class Creature {
     const t = this.t;
 
     const P = {
-      scale: 1, jump: 0, squash: 0, bodyRoll: 0, bodyYaw: 0,
-      headYaw: 0, headPitch: 0, headRoll: 0, earBack: 0, earUp: 0,
+      scale: 1, jump: 0, squash: 0, bodyRoll: 0, bodyYaw: 0, bodyPitch: 0,
+      headYaw: 0, headPitch: 0, headRoll: 0, earBack: 0, earUp: 0, legSwing: 0,
       tailAmp: 0.25, tailSpeed: 2.6, tailPuff: 1, eyes: 'open', mouth: 0, blush: 0.45,
     };
 
@@ -535,15 +601,25 @@ export class Creature {
     }
 
     // Спонтанное поведение, когда никто не трогает.
-    const busy = this.action || this.petting || this.talk > 0.02 || this.listening || this.turning;
+    const busy = this.action || this.petting || this.talk > 0.02 || this.listening || this.turning || this.moving;
     if (!busy) {
       this.idleTimer -= dt;
       if (this.idleTimer <= 0) {
         this.idleTimer = rand(2.8, 6.5);
         let r = Math.random() * IDLE.reduce((s, [, w]) => s + w, 0);
-        for (const [name, w] of IDLE) { if ((r -= w) <= 0) { this.play(name); break; } }
+        for (const [name, w] of IDLE) {
+          if ((r -= w) > 0) continue;
+          if (name !== 'wander') this.play(name);
+          else {
+            const p = this.pickWanderPoint?.();
+            if (p) this.goTo(p, { run: Math.random() < 0.2 });
+          }
+          break;
+        }
       }
     }
+    if (this.petting || this.listening) this.stop();
+    this._updateMove(dt, P);
 
     // Поглаживание.
     this.petLevel = damp(this.petLevel, this.petting ? 1 : 0, this.petting ? 4 : 2.5, dt);
@@ -579,23 +655,29 @@ export class Creature {
   }
 
   _updateFacing(dt, P) {
-    if (!this.faceTarget || !this.root.parent) { this.turning = false; return; }
+    if (!this.faceTarget || !this.root.parent || this.moving) { this.turning = false; return; }
     const local = this.root.parent.worldToLocal(this.faceTarget.clone());
     const want = Math.atan2(local.x - this.root.position.x, local.z - this.root.position.z) + this.facingBias;
     const diff = angleDiff(want, this.root.rotation.y);
-    if (!this.turning && Math.abs(diff) > 0.85 && !this.action) this.turning = true;
+    const threshold = this.faceAfterMove ? 0.2 : 0.85;
+    if (!this.turning && Math.abs(diff) > threshold && !this.action) this.turning = true;
+    if (!this.turning && Math.abs(diff) <= threshold) this.faceAfterMove = false;
     if (this.turning) {
       const step = Math.sign(diff) * Math.min(Math.abs(diff), 2.6 * dt);
       this.root.rotation.y += step;
       P.jump += 0.035 * Math.abs(Math.sin(this.t * 15));
       P.tailAmp = Math.max(P.tailAmp, 0.5);
-      if (Math.abs(diff) < 0.12) this.turning = false;
+      if (Math.abs(diff) < 0.12) { this.turning = false; this.faceAfterMove = false; }
     }
   }
 
   _updateLook(dt) {
     const L = this.look;
-    const v = this.body.worldToLocal(this.lookTarget.clone()).sub(this.headPivot.position);
+    // На ходу смотрит туда, куда идёт.
+    const target = this.moving && this.root.parent
+      ? this.root.parent.localToWorld(this.move.target.clone().setY(0.8))
+      : this.lookTarget.clone();
+    const v = this.body.worldToLocal(target).sub(this.headPivot.position);
     let yaw = Math.atan2(v.x, v.z);
     let pitch = Math.atan2(v.y - 0.27, Math.hypot(v.x, v.z));
     // Маленькие «взгляды по сторонам», чтобы не смотрел как робот.
@@ -628,7 +710,13 @@ export class Creature {
 
     const sq = P.squash + Math.sin(t * 2.4) * 0.012; // дыхание
     this.body.scale.set(1 - sq * 0.5, 1 + sq, 1 - sq * 0.5);
-    this.body.rotation.set(0, P.bodyYaw, P.bodyRoll);
+    this.body.rotation.set(P.bodyPitch, P.bodyYaw, P.bodyRoll);
+
+    // Лапки на ходу: передние качаются, задние семенят.
+    this.frontLegs.forEach((leg, i) => { leg.rotation.x = (i ? 1 : -1) * P.legSwing; });
+    this.backFeet.forEach((foot, i) => {
+      foot.position.z = foot.userData.base.z + (i ? -1 : 1) * 0.06 * P.legSwing;
+    });
 
     const L = this.look;
     this.headPivot.rotation.set(-L.pitch + P.headPitch, L.yaw + P.headYaw, P.headRoll);
