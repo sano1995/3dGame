@@ -113,5 +113,32 @@ html, body {
   50% { translate: 0 -18px; }
 }
 
+/* Режим камеры: видео с камеры под прозрачной 3D-сценой. */
+#camfeed {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+  background: #000;
+}
+body.cam #camfeed { display: block; }
+
+/* Сообщения для взрослых (ребёнку они не нужны, поэтому мелко и коротко). */
+#toast {
+  position: absolute;
+  top: calc(52px + env(safe-area-inset-top));
+  left: 16px;
+  right: 16px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 14px;
+  line-height: 1.35;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+#toast[hidden] { display: none; }
+
 /* В AR фон — это камера, поэтому всё прозрачное. */
-body.ar { background: transparent; }
+body.ar, body.cam { background: transparent; }
