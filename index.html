@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#fbe3f1" />
+    <meta name="description" content="Карманный зверёк: AR-тамагочи" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="./icon-192.png" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <title>Пушистик</title>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="overlay">
+      <div id="badge" hidden></div>
+      <div id="hint" hidden aria-hidden="true">👆</div>
+      <div id="bar">
+        <button id="btn-voice" class="round" aria-label="Повторялка">🎤</button>
+        <button id="btn-color" class="round" aria-label="Другой цвет">🎨</button>
+        <button id="btn-ar" class="round big" aria-label="Позвать в комнату" hidden>📷</button>
+        <button id="btn-place" class="round" aria-label="Пересадить" hidden>🔄</button>
+        <button id="btn-home" class="round" aria-label="Домой" hidden>🏠</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
